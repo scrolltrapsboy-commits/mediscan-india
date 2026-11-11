@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><title>MediScan India</title><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@600;700&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="{{ url_for('static', filename='css/tailwind.css') }}" rel="stylesheet"/>
+<link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet"/></head>
+<body class="bg-surface-container-lowest font-body-md text-on-surface antialiased"><header class="fixed top-0 left-0 w-full z-50 bg-surface-container-lowest/90 backdrop-blur-md border-b border-surface-container-high"><div class="h-16 max-w-7xl mx-auto px-margin flex items-center justify-between"><a class="flex items-center gap-2 group" href="#top"><div class="w-6 h-6 rounded flex items-center justify-center bg-secondary-fixed text-on-secondary-fixed"><span class="material-symbols-outlined text-[16px]">add</span></div><span class="font-headline-sm text-headline-sm text-on-surface tracking-tight">MediScan <span class="text-primary font-normal">India</span></span></a><nav class="flex items-center gap-space-lg"><a aria-current="page" class="transition-colors text-primary font-semibold" href="#top">Home</a><a class="font-label-lg text-label-lg text-on-surface-variant hover:text-on-surface transition-colors" href="#about">About</a></nav></div></header><main class="w-full pt-16 bg-surface-container-lowest min-h-screen" id="top"><div class="flex flex-col w-full max-w-7xl mx-auto px-margin-mobile md:px-margin py-space-xl text-on-surface">
+<section class="mb-space-xl max-w-3xl">
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight mb-space-xs">
+      Identify Indian Medicines Instantly
+    </h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant leading-relaxed">
+      Upload a blister strip, bottle, or tablet photo to view verified composition, usage guidance, and affordable alternatives.
+    </p>
+</section>
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-gutter mb-space-xl items-start">
+<div class="lg:col-span-5 bg-surface-container-low rounded-xl p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<h2 class="font-headline-sm text-headline-sm text-on-surface">
+          Identify Your Medicine
+        </h2>
+<span class="font-label-sm text-label-sm text-primary uppercase tracking-wider">Vision Match</span>
+</div>
+<div class="grid grid-cols-2 gap-space-sm">
+<button class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-surface-container-lowest text-on-surface hover:bg-surface transition-colors shadow-sm font-label-md text-label-md" id="uploadTrigger" type="button">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">upload_file</span>
+<span>Upload Photo</span>
+</button>
+<button class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-surface-container-lowest text-on-surface hover:bg-surface transition-colors shadow-sm font-label-md text-label-md" id="cameraTrigger" type="button">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">photo_camera</span>
+<span id="cameraTriggerText">Open Camera</span>
+</button>
+</div>
+<input accept="image/jpeg,image/png,image/webp" class="hidden" id="fileInput" type="file"/>
+<div class="relative w-full rounded-lg overflow-hidden bg-surface-container-lowest shadow-sm flex flex-col">
+<div class="relative aspect-[4/3] w-full bg-surface-container" id="previewArea">
+<div class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-on-surface-variant text-center px-space-md" id="previewPlaceholder">
+<span class="material-symbols-outlined text-[40px] text-outline">medication</span>
+<span class="font-label-md text-label-md">No photo selected</span>
+<span class="font-body-sm text-body-sm text-outline">Upload a photo or open the camera to begin.</span>
+</div>
+<img alt="Selected medicine photo" class="hidden w-full h-full object-cover transition-opacity duration-300" id="stripPreview"/>
+<video autoplay class="hidden w-full h-full object-cover bg-on-surface" id="cameraVideo" muted playsinline></video>
+<div aria-live="polite" class="capsule-loader hidden" id="loaderOverlay" role="status">
+<div class="capsule-pill"><div class="capsule-medicine"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="capsule-side"></div><div class="capsule-side"></div></div>
+<span class="capsule-text" id="loaderText">Analysing medicine...</span>
+<button class="capsule-cancel" id="loaderCancel" type="button">Cancel</button>
+</div>
+<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-on-surface/60 to-transparent p-space-sm flex items-center justify-between gap-2 hidden" id="previewBar">
+<span class="font-data-mono text-data-mono text-surface-bright flex items-center gap-1.5 min-w-0" id="fileInfo">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed shrink-0"></span>
+<span class="truncate" id="fileName"></span>
+</span>
+<span class="font-label-sm text-label-sm text-surface-bright/80 shrink-0" id="fileSize"></span>
+<div class="flex items-center gap-1.5 shrink-0" id="previewActions"></div>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between px-space-xs gap-2 min-h-[20px]">
+<div class="flex items-center gap-2" id="qualityLeft">
+<span class="material-symbols-outlined text-secondary text-[16px] hidden" id="qualityIcon">check_circle</span>
+<span class="font-label-md text-label-md text-on-surface-variant" id="qualityText"></span>
+</div>
+<span class="font-label-sm text-label-sm text-outline" id="ocrConfidence"></span>
+</div>
+<div class="hidden rounded-lg px-space-md py-space-sm font-body-sm text-body-sm flex gap-2 items-start border" id="statusBox" role="alert">
+<span class="material-symbols-outlined text-[18px] mt-0.5" id="statusIcon">info</span>
+<span id="statusText"></span>
+</div>
+<button class="w-full py-3 rounded-lg bg-primary hover:bg-primary-container text-on-primary transition-all font-label-lg text-label-lg flex items-center justify-center gap-2 shadow-sm active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none" disabled id="scanActionButton" type="button">
+<span class="material-symbols-outlined text-[20px]">document_scanner</span>
+<span id="scanBtnText">Identify Medicine</span>
+</button>
+</div>
+<div class="lg:col-span-7 bg-surface-container-lowest rounded-xl p-space-lg shadow-sm flex flex-col gap-space-lg" id="resultCard">
+<div class="flex flex-col items-start gap-space-sm py-space-xl text-on-surface-variant" id="resultEmpty">
+<span class="material-symbols-outlined text-[36px] text-outline">pill</span>
+<h3 class="font-headline-md text-headline-md text-on-surface tracking-tight">Medicine details will appear here</h3>
+<p class="font-body-md text-body-md">Add a clear photo of the printed name on a strip, box or bottle, then choose Identify Medicine. Only information returned by the DrugSetu medicine database is shown.</p>
+</div>
+<div class="hidden flex-col gap-space-lg" id="resultContent">
+<div class="flex items-start justify-between gap-space-md">
+<div class="min-w-0">
+<div class="flex flex-wrap items-center gap-space-sm mb-1.5" id="resultBadges"></div>
+<h3 class="font-headline-md text-headline-md text-on-surface tracking-tight mb-1" id="resName"></h3>
+<p class="font-body-md text-body-md text-on-surface-variant" id="resGeneric"></p>
+</div>
+<img alt="Product" class="hidden w-20 h-20 rounded-lg object-contain bg-surface-container-low shrink-0" id="resImage"/>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-md p-space-md rounded-lg bg-surface-container-low" id="resFacts"></div>
+<div class="space-y-space-md" id="resSections"></div>
+<p class="font-body-sm text-body-sm text-outline">For medicine information only. This does not replace advice from a doctor or pharmacist.</p>
+</div>
+</div>
+</section>
+<div class="h-px w-full bg-surface-container-high mb-space-xl"></div>
+<section class="flex flex-col gap-space-md">
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-space-xs mb-space-xs">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-surface tracking-tight mb-1">
+          Compare Medicine Prices
+        </h2>
+<p class="font-body-md text-body-md text-on-surface-variant">
+          Equivalent formulations with identical active salts and strength.
+        </p>
+</div>
+<div class="text-left md:text-right">
+<span class="font-label-sm text-label-sm text-outline" id="formulationStandard"></span>
+</div>
+</div>
+<div class="overflow-x-auto rounded-xl bg-surface-container-lowest shadow-sm">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low text-on-surface-variant">
+<th class="py-3.5 px-space-md font-label-md text-label-md uppercase tracking-wider">Brand Name</th>
+<th class="py-3.5 px-space-md font-label-md text-label-md uppercase tracking-wider">Manufacturer</th>
+<th class="py-3.5 px-space-md font-label-md text-label-md uppercase tracking-wider">Pack Size</th>
+<th class="py-3.5 px-space-md font-label-md text-label-md uppercase tracking-wider text-right">Price (₹)</th>
+<th class="py-3.5 px-space-md font-label-md text-label-md uppercase tracking-wider text-right">Per Tablet</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container-low font-body-sm text-body-sm text-on-surface" id="priceBody"></tbody>
+</table>
+<p class="py-space-lg px-space-md font-body-sm text-body-sm text-on-surface-variant" id="priceEmpty">Identify a medicine to compare equivalent products. A comparison is shown only when the database returns matching salts, strength and dosage form with known prices.</p>
+</div>
+<div class="flex items-center justify-between text-on-surface-variant pt-space-xs font-body-sm text-body-sm">
+<p class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-primary">verified_user</span>
+        Prices are the MRP returned by the DrugSetu database.
+      </p>
+</div>
+</section>
+<section class="mt-space-xl pt-space-xl border-t border-surface-container-high max-w-3xl flex flex-col gap-space-sm" id="about">
+<h2 class="font-headline-sm text-headline-sm text-on-surface">About MediScan India</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">A photo is cleaned up with OpenCV (grayscale, noise reduction and edge analysis), its printed text is read with OCR, and the name is looked up in the DrugSetu medicine database. A loose tablet with no printed marking cannot be identified from a photo.</p>
+<p class="font-body-sm text-body-sm text-outline"><strong>Privacy:</strong> photos are processed in memory to read the text and are not stored. <strong>Terms:</strong> this is an informational tool and does not replace professional medical advice.</p>
+</section>
+</div></main><footer class="w-full bg-surface-container-lowest border-t border-surface-container-high py-space-xl"><div class="max-w-7xl mx-auto px-margin flex flex-col md:flex-row items-center justify-between gap-space-md text-center md:text-left"><p class="font-body-sm text-body-sm text-on-surface-variant">© MediScan India. An informational medicine identification tool.</p><div class="flex items-center gap-space-lg"><a class="font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-colors" href="#about">Privacy</a><a class="font-label-md text-label-md text-on-surface-variant hover:text-on-surface transition-colors" href="#about">Terms</a></div></div></footer>
+<script src="{{ url_for('static', filename='js/loader.js') }}"></script>
+<script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body></html>

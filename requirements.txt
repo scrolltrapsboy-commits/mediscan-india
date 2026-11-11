@@ -1,0 +1,18 @@
+# Install with:
+#   pip install -r requirements.txt
+#   pip install --no-deps rapidocr-onnxruntime==1.2.3
+# (rapidocr-onnxruntime is installed with --no-deps because it would otherwise pull the
+#  GUI build "opencv-python", which needs libGL and breaks on Render. Its other
+#  dependencies are listed below.)
+flask>=3.0,<4
+gunicorn>=22.0
+requests>=2.31
+python-dotenv>=1.0
+opencv-python-headless>=4.9
+numpy>=1.26
+onnxruntime>=1.17
+Pillow>=10.0
+pyclipper>=1.3
+PyYAML>=6.0
+Shapely>=2.0
+six>=1.16
