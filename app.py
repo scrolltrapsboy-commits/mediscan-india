@@ -64,7 +64,27 @@ def create_app(drugsetu_client=None) -> Flask:
 
     @app.get("/healthz")
     def healthz():
-        return jsonify(status="ok", drugsetu_configured=client.configured)
+        # Lightweight deployment health check: do not load OCR models here.
+        try:
+            from importlib.util import find_spec
+            ocr_installed = find_spec("rapidocr_onnxruntime") is not None
+        except (ImportError, ModuleNotFoundError, ValueError):
+            ocr_installed = False
+        return jsonify(
+            status="ok",
+            drugsetu_configured=client.configured,
+            ocr_package_installed=ocr_installed,
+        )
+
+    @app.get("/ocr-healthz")
+    def ocr_healthz():
+        # Explicit diagnostic endpoint that loads the OCR engine once.
+        try:
+            ocr_service._get_engine()
+            return jsonify(status="ok", ocr_engine="ready")
+        except ocr_service.OcrUnavailable:
+            log.exception("OCR readiness check failed")
+            return jsonify(status="error", ocr_engine="unavailable"), 503
 
     @app.errorhandler(413)
     def too_large(_e):
