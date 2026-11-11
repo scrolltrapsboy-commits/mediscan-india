@@ -6,11 +6,10 @@ and was NOT available when this module was written, and no API key was
 supplied, so NO real request has been made to DrugSetu by this project.
 
 What is known from public sources (two sources, which disagree on the host):
-  * drugsetu.com home page : base https://api.drugsetu.in/v1, GET /medicines/search?q=
-  * a third-party repo that says it verified against the live API:
-        base https://api.drugsetu.com/v1, GET /products/search?q=,
-        GET /products/{id}, auth header `X-API-Key: <private key, ds_...>`,
-        search returns at most 10 results, ~1 request/second rate limit.
+  * Official DrugSetu website API example: base https://api.drugsetu.in/v1,
+    GET /medicines/search?q=..., header X-API-Key with a ds_live_... key.
+  * Detail endpoint and complete response schema are not shown in the public
+    example; detail lookup remains optional and configurable.
   * Response field names are NOT published publicly (only `product_form`,
     `mrp`, `packagings`, composition strings like "Metformin (500mg)").
 
@@ -31,8 +30,10 @@ from typing import Any, Optional
 
 import requests
 
-DEFAULT_BASE_URL = "https://api.drugsetu.com/v1"
-DEFAULT_SEARCH_PATH = "/products/search"
+# Official DrugSetu website API example uses api.drugsetu.in and /medicines/search.
+DEFAULT_BASE_URL = "https://api.drugsetu.in/v1"
+DEFAULT_SEARCH_PATH = "/medicines/search"
+# Detail endpoint is not shown in the public example; keep it optional/configurable.
 DEFAULT_DETAIL_PATH = "/products/{id}"
 DEFAULT_AUTH_HEADER = "X-API-Key"
 REQUEST_TIMEOUT = (5, 15)          # (connect, read) seconds
