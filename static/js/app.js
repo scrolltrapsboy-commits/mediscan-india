@@ -246,6 +246,11 @@
       setStatus("warn", "We could not confirm this medicine from the photo. Check the possible matches against your pack.");
       return;
     }
+    if (status === "google_fallback") {
+      renderGoogleFallback(data.google || {}, data.ocr);
+      setStatus("warn", data.message || "DrugSetu had no match. Check these Google Search results before relying on any medicine information.");
+      return;
+    }
     var kind = (status === "api_error") ? "error" : "warn";
     var msg = data.message || "The medicine could not be identified.";
     if (data.warnings && data.warnings.length) msg += " " + data.warnings.join(" ");
@@ -269,6 +274,34 @@
       '<h3 class="font-headline-md text-headline-md text-on-surface tracking-tight">Text read from your photo</h3>' +
       '<p class="font-body-md text-body-md">Possible names: <strong>' + lines + "</strong>" +
       (ocr.strengths && ocr.strengths.length ? "<br/>Strengths seen: " + ocr.strengths.map(esc).join(", ") : "") + "</p>";
+  }
+
+  function renderGoogleFallback(google, ocr) {
+    els.resEmpty.classList.remove("hidden");
+    els.resContent.classList.add("hidden");
+    var names = (ocr && ocr.candidate_names) || [];
+    var strengths = (ocr && ocr.strengths) || [];
+    var query = names.concat(strengths).join(" ") || "Indian medicine";
+    var html = '<span class="material-symbols-outlined text-[36px] text-primary">travel_explore</span>' +
+      '<h3 class="font-headline-md text-headline-md text-on-surface tracking-tight">Google Search fallback</h3>' +
+      '<p class="font-body-md text-body-md text-on-surface-variant">DrugSetu returned no matching record. The links below are web-search references, not verified medical records.</p>';
+    if (google.items && google.items.length) {
+      html += '<div class="flex flex-col gap-3 mt-3">';
+      google.items.forEach(function (item) {
+        html += '<article class="rounded-lg border border-surface-container-high p-3">' +
+          '<a class="font-label-md text-label-md text-primary underline" href="' + esc(item.link) + '" target="_blank" rel="noopener noreferrer">' + esc(item.title || item.link) + '</a>' +
+          '<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">' + esc(item.snippet || "") + '</p>' +
+          '<span class="font-label-sm text-label-sm text-outline">' + esc(item.displayLink || "Google Search result") + '</span></article>';
+      });
+      html += '</div>';
+    }
+    var url = google.search_url || ("https://www.google.com/search?q=" + encodeURIComponent(query + " medicine India"));
+    html += '<a class="inline-flex items-center gap-2 mt-3 px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md text-label-md" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">Open Google Search <span aria-hidden="true">↗</span></a>';
+    html += '<p class="font-body-sm text-body-sm text-outline mt-3">Check the product name, composition, strength and manufacturer against the package. Do not use search snippets alone to make treatment decisions.</p>';
+    els.resEmpty.innerHTML = html;
+    els.priceBody.innerHTML = "";
+    els.priceEmpty.classList.remove("hidden");
+    els.priceEmpty.textContent = "No verified price comparison is available from DrugSetu for this medicine.";
   }
 
   function fact(label, value) {
