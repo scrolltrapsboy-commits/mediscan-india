@@ -145,9 +145,24 @@ def create_app(drugsetu_client=None) -> Flask:
                            message="Medicine lookup failed. Please try again."), 502
 
         if result["status"] == "not_found":
-            return jsonify(status="not_found", vision=vision, ocr=ocr_info, warnings=warnings,
-                           message="No matching medicine was found in the database for the text read "
-                                   "from the photo.")
+            # DrugSetu is primary. Only a genuine empty result triggers Google Search fallback.
+            try:
+                from google_search_fallback import search_medicine
+                google_result = search_medicine(
+                    parsed["names"], parsed["strengths"], parsed["manufacturers"]
+                )
+            except Exception:
+                log.exception("Google Search fallback failed")
+                google_result = {"configured": False, "items": [], "search_url": None}
+
+            return jsonify(
+                status="google_fallback",
+                vision=vision,
+                ocr=ocr_info,
+                warnings=warnings,
+                message="DrugSetu did not return a matching medicine. These Google Search results are a fallback; verify details with the manufacturer or a pharmacist.",
+                google=google_result,
+            )
         if ocr.mean_confidence < 0.6 and result["status"] == "confirmed":
             warnings.append("Text recognition confidence was low. Please check the name against your pack.")
 
