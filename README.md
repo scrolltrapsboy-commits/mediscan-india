@@ -65,9 +65,12 @@ Rows appear only for products with identical active ingredients **and** strength
 
 ## Deploy on Render
 1. Push to GitHub (`.env` is git-ignored).
-2. New → Blueprint → select the repo (uses `render.yaml`; Python 3.11, build installs RapidOCR with `--no-deps`, start `gunicorn app:app`, health check `/healthz`).
+2. New → Blueprint → select the repo (uses `render.yaml`). The build installs RapidOCR and runs an import check; deployment fails if the OCR package is missing. Start command: `gunicorn app:app`; health check: `/healthz`.
+3. If you created a regular Web Service rather than a Blueprint, open Settings → Build & Deploy and set the Build Command to:
+   `python -m pip install --upgrade pip && python -m pip install -r requirements.txt && python -m pip install --no-deps rapidocr-onnxruntime==1.2.3 && python -c "from rapidocr_onnxruntime import RapidOCR; print('RapidOCR package import OK')"`
+   Save and deploy the latest commit. A regular Web Service may not automatically apply changes in `render.yaml`.
 3. Set `DRUGSETU_API_KEY` in the Render dashboard. Render serves HTTPS, so the camera works.
-Free instances have 512 MB RAM and sleep when idle; the first OCR request loads the model (slow).
+Free instances have limited RAM and sleep when idle; the first OCR request loads the model (slow). Check `/ocr-healthz` after deployment to verify the OCR engine can initialize. `/healthz` reports package installation without loading the model.
 
 ## Testing
 ```bat
