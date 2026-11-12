@@ -3,12 +3,8 @@ services:
     name: mediscan-india
     runtime: python
     plan: free
-    # Fail the build if RapidOCR is not actually installed.
-    buildCommand: >-
-      python -m pip install --upgrade pip &&
-      python -m pip install -r requirements.txt &&
-      python -m pip install --no-deps rapidocr-onnxruntime==1.2.3 &&
-      python -c "from rapidocr_onnxruntime import RapidOCR; print('RapidOCR package import OK')"
+    # Keep the production image lean; scans use Gemini's native image input.
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 120
     healthCheckPath: /healthz
     envVars:
