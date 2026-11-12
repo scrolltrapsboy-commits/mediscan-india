@@ -116,11 +116,9 @@ def create_app(gemini_client=None) -> Flask:
                            message="Unsupported file. Please upload a JPG, PNG or WEBP image."), 415
 
         # Heavy computer-vision libraries are imported only for an actual scan.
-        # The landing page and Render's /healthz check stay lightweight.
-        import image_processor
-
-        # ---- OpenCV (ECE3107 Module 3) ----
+        # Keep the import inside the guarded block so import failures return JSON.
         try:
+            import image_processor
             img = image_processor.load_image(data)
             processed = image_processor.preprocess_image(img)
         except image_processor.ImageError as exc:
@@ -129,9 +127,10 @@ def create_app(gemini_client=None) -> Flask:
             log.exception("image processing failed")
             return jsonify(status="error", message="The image could not be processed."), 500
 
+        is_blurry = processed.is_blurry
         vision = {
             "width": processed.width, "height": processed.height,
-            "sharpness": processed.sharpness, "is_blurry": processed.is_blurry,
+            "sharpness": processed.sharpness, "is_blurry": is_blurry,
             "edge_density": processed.edge_density, "ocr_input": processed.selected,
             "packaging_region_found": processed.roi_found,
         }
@@ -148,17 +147,17 @@ def create_app(gemini_client=None) -> Flask:
         del processed, img
         if not ocr.lines:
             msg = ("The photo looks blurry and no text could be read. Please retake it in good light, "
-                   "holding the camera steady." if processed.is_blurry else
+                   "holding the camera steady." if is_blurry else
                    "No readable text was found. Photograph the printed name on the strip or box. "
                    "Loose tablets without markings cannot be identified from a photo.")
-            return jsonify(status="blurry" if processed.is_blurry else "no_text", message=msg, vision=vision)
+            return jsonify(status="blurry" if is_blurry else "no_text", message=msg, vision=vision)
 
         parsed = ocr_service.parse_medicine_text(ocr.lines)
         ocr_info = {"text": ocr.text, "confidence": round(ocr.mean_confidence * 100, 1),
                     "candidate_names": parsed["names"], "strengths": parsed["strengths"],
                     "manufacturers": parsed["manufacturers"], "input_used": ocr.candidate_used}
         warnings = []
-        if processed.is_blurry:
+        if is_blurry:
             warnings.append("The photo is slightly out of focus; the reading may be inaccurate.")
         if not parsed["names"]:
             return jsonify(status="no_name", vision=vision, ocr=ocr_info, warnings=warnings,
