@@ -9,9 +9,15 @@ from __future__ import annotations
 import logging
 import os
 
+# Limit native numerical-library thread pools on small Render instances. These
+# must be set before OpenCV / NumPy / ONNX Runtime are imported.
+for _thread_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                    "NUMEXPR_NUM_THREADS", "ORT_INTRA_OP_NUM_THREADS",
+                    "ORT_INTER_OP_NUM_THREADS"):
+    os.environ.setdefault(_thread_var, "1")
+
 from flask import Flask, jsonify, render_template, request
 
-import image_processor
 import medicine_dataset
 import ocr_service
 from gemini_client import (GeminiAuthError, GeminiError, GeminiInvalidResponse,
@@ -50,8 +56,6 @@ def create_app(gemini_client=None) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + 1024 * 64
     client = gemini_client or GeminiMedicineClient()
-    if isinstance(client, GeminiMedicineClient):
-        medicine_dataset.warm_catalog()
 
     @app.after_request
     def security_headers(resp):
@@ -111,6 +115,10 @@ def create_app(gemini_client=None) -> Flask:
             return jsonify(status="error",
                            message="Unsupported file. Please upload a JPG, PNG or WEBP image."), 415
 
+        # Heavy computer-vision libraries are imported only for an actual scan.
+        # The landing page and Render's /healthz check stay lightweight.
+        import image_processor
+
         # ---- OpenCV (ECE3107 Module 3) ----
         try:
             img = image_processor.load_image(data)
@@ -135,6 +143,9 @@ def create_app(gemini_client=None) -> Flask:
             log.exception("OCR unavailable")
             return jsonify(status="error", message="Text recognition is temporarily unavailable.",
                            vision=vision), 503
+        # OCR has consumed the candidate arrays. Drop decoded/preprocessed image
+        # buffers before the Gemini network request to lower peak resident memory.
+        del processed, img
         if not ocr.lines:
             msg = ("The photo looks blurry and no text could be read. Please retake it in good light, "
                    "holding the camera steady." if processed.is_blurry else
