@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import io
 
 # Limit native numerical-library thread pools on small Render instances. These
 # must be set before OpenCV / NumPy / ONNX Runtime are imported.
@@ -18,8 +19,6 @@ for _thread_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"
 
 from flask import Flask, jsonify, render_template, request
 
-import medicine_dataset
-import ocr_service
 from gemini_client import (GeminiAuthError, GeminiError, GeminiInvalidResponse,
                            GeminiMedicineClient, GeminiModelError, GeminiNotConfigured,
                            GeminiQuotaError, GeminiSafetyBlocked)
@@ -114,6 +113,14 @@ def create_app(gemini_client=None) -> Flask:
 
     @app.post("/api/identify")
     def identify():
+        """Identify directly from the uploaded package image.
+
+        The hosted free instance has only 512 MiB RAM. Loading OpenCV,
+        RapidOCR/ONNX and the in-memory 348k-row CSV index in one request can
+        exceed that limit and cause Render to return a proxy-level 502 with no
+        Flask traceback. Gemini already accepts the original image, so keep
+        this route image-native and avoid those heavyweight local stages.
+        """
         upload = request.files.get("image")
         if upload is None or not upload.filename:
             return jsonify(status="error", message="Please choose or capture a medicine photo first."), 400
@@ -124,168 +131,83 @@ def create_app(gemini_client=None) -> Flask:
 
         kind = sniff_image_type(data)
         if kind not in ALLOWED_TYPES:
-            return jsonify(status="error",
-                           message="Unsupported file. Please upload a JPG, PNG or WEBP image."), 415
+            return jsonify(status="error", message="Unsupported file. Please upload a JPG, PNG or WEBP image."), 415
 
-        # Heavy computer-vision libraries are imported only for an actual scan.
-        # Keep the import inside the guarded block so import failures return JSON.
+        # Validate dimensions without allocating OpenCV/NumPy image buffers.
         try:
-            import image_processor
-            img = image_processor.load_image(data)
-            processed = image_processor.preprocess_image(img)
-        except image_processor.ImageError as exc:
-            return jsonify(status="error", message=str(exc)), 400
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as image:
+                width, height = image.size
+                image.verify()
+            if width < 32 or height < 32:
+                return jsonify(status="error", message="The image is too small to read."), 400
         except Exception:
-            log.exception("image processing failed")
-            return jsonify(status="error", message="The image could not be processed."), 500
+            return jsonify(status="error", message="The image is corrupted or could not be opened."), 400
 
-        is_blurry = processed.is_blurry
         vision = {
-            "width": processed.width, "height": processed.height,
-            "sharpness": processed.sharpness, "is_blurry": is_blurry,
-            "edge_density": processed.edge_density, "ocr_input": processed.selected,
-            "packaging_region_found": processed.roi_found,
+            "width": width,
+            "height": height,
+            "is_blurry": False,
+            "sharpness": None,
+            "edge_density": None,
+            "ocr_input": "original_image",
+            "packaging_region_found": False,
+        }
+        # The image itself is the primary evidence. No OCR-derived name is
+        # fabricated; Gemini reads the visible package text directly.
+        ocr_info = {
+            "text": "",
+            "confidence": 0,
+            "candidate_names": [],
+            "strengths": [],
+            "manufacturers": [],
+            "input_used": "Gemini image analysis",
         }
 
-        # ---- OCR ----
-        try:
-            ocr = ocr_service.extract_text(processed.candidates)
-        except ocr_service.OcrUnavailable:
-            log.exception("OCR unavailable")
-            return jsonify(status="error", message="Text recognition is temporarily unavailable.",
-                           vision=vision), 503
-        # OCR has consumed the candidate arrays. Drop decoded/preprocessed image
-        # buffers before the Gemini network request to lower peak resident memory.
-        del processed, img
-        if not ocr.lines:
-            msg = ("The photo looks blurry and no text could be read. Please retake it in good light, "
-                   "holding the camera steady." if is_blurry else
-                   "No readable text was found. Photograph the printed name on the strip or box. "
-                   "Loose tablets without markings cannot be identified from a photo.")
-            return jsonify(status="blurry" if is_blurry else "no_text", message=msg, vision=vision)
-
-        parsed = ocr_service.parse_medicine_text(ocr.lines)
-        ocr_info = {"text": ocr.text, "confidence": round(ocr.mean_confidence * 100, 1),
-                    "candidate_names": parsed["names"], "strengths": parsed["strengths"],
-                    "manufacturers": parsed["manufacturers"], "input_used": ocr.candidate_used}
-        warnings = []
-        if is_blurry:
-            warnings.append("The photo is slightly out of focus; the reading may be inaccurate.")
-        if not parsed["names"]:
-            return jsonify(status="no_name", vision=vision, ocr=ocr_info, warnings=warnings,
-                           message="Text was found but no medicine name could be identified. "
-                                   "Try a closer, sharper photo of the brand name.")
-
-        def local_fallback(message):
-            local_match = medicine_dataset.find(parsed["names"])
-            if not local_match:
-                return None
-            return jsonify(
-                status="confirmed",
-                vision=vision,
-                ocr=ocr_info,
-                warnings=warnings + [message, "Verify this unverified CSV result against the medicine package or a pharmacist."],
-                match=public_match(local_match),
-                possible=[],
-                comparison={"rows": medicine_dataset.comparable(local_match), "basis": "mrp", "price_status": "local_dataset"},
-            )
-
-        def provider_warning(message):
-            return jsonify(
-                status="not_identified",
-                vision=vision,
-                ocr=ocr_info,
-                warnings=warnings + [message],
-                message="The photo was read, but no verified medicine details are available for this name yet.",
-                match=None,
-                possible=[],
-                comparison={"rows": [], "basis": "mrp", "price_status": "unavailable"},
-            )
-
-        if isinstance(client, GeminiMedicineClient):
-            local_match = medicine_dataset.find(parsed["names"])
-            if local_match:
-                return local_fallback("Matched from the bundled local medicine dataset.")
-
-        # ---- Gemini ----
         try:
             result = client.identify(
-                parsed["names"], parsed["strengths"], image_bytes=data,
-                mime_type="image/" + kind if kind != "jpg" else "image/jpeg",
-                ocr_text=ocr.text, manufacturers=parsed["manufacturers"],
+                [], [], image_bytes=data,
+                mime_type="image/jpeg" if kind == "jpeg" else "image/" + kind,
+                ocr_text="",
+                manufacturers=[],
             )
         except GeminiNotConfigured as exc:
-            fallback = local_fallback("Gemini was unavailable; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
-            return provider_warning(str(exc))
+            return jsonify(status="error", message=str(exc), vision=vision, ocr=ocr_info), 503
         except GeminiAuthError as exc:
-            fallback = local_fallback("Gemini credentials were rejected; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
-            return provider_warning(str(exc))
+            return jsonify(status="error", message=str(exc), vision=vision, ocr=ocr_info), 503
         except GeminiModelError as exc:
-            fallback = local_fallback("The Gemini model was unavailable; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
-            return provider_warning(str(exc))
+            return jsonify(status="error", message=str(exc), vision=vision, ocr=ocr_info), 503
         except GeminiQuotaError as exc:
-            fallback = local_fallback("Gemini quota was unavailable; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
-            return provider_warning(str(exc))
+            return jsonify(status="error", message=str(exc), vision=vision, ocr=ocr_info), 429
         except GeminiSafetyBlocked as exc:
-            fallback = local_fallback("Gemini could not analyze the image; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
-            return provider_warning(str(exc))
+            return jsonify(status="not_identified", message=str(exc), vision=vision, ocr=ocr_info,
+                           match=None, possible=[], comparison={"rows": [], "basis": "unavailable", "price_status": "unavailable"}), 200
         except GeminiInvalidResponse as exc:
-            fallback = local_fallback("Gemini returned no usable result; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
             log.warning("Gemini returned invalid data: %s", exc)
-            return provider_warning(str(exc))
+            return jsonify(status="error", message="The medicine image could not be interpreted. Please try a clearer package photo.",
+                           vision=vision, ocr=ocr_info), 502
         except GeminiError as exc:
-            fallback = local_fallback("Gemini was temporarily unavailable; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
-            log.warning("Gemini error: %s", exc)
-            return provider_warning(str(exc))
+            log.warning("Gemini identification failed: %s", exc)
+            return jsonify(status="error", message=str(exc), vision=vision, ocr=ocr_info), 503
         except Exception:
-            fallback = local_fallback("Gemini was temporarily unavailable; the result was matched from the bundled local dataset.")
-            if fallback:
-                return fallback
-            log.exception("unexpected Gemini failure")
-            return provider_warning("Gemini was temporarily unavailable; the OCR text is shown for verification.")
+            log.exception("unexpected medicine identification failure")
+            return jsonify(status="error", message="Medicine identification is temporarily unavailable. Please try again.",
+                           vision=vision, ocr=ocr_info), 503
 
-        # Local CSV records provide pack, manufacturer, composition and price data.
-        # Gemini remains responsible for reading the image; CSV values are shown as
-        # unverified dataset information and are never treated as live prices.
-        result = medicine_dataset.enrich_result(result, parsed["names"])
-        if result["status"] == "not_identified":
-            local_match = medicine_dataset.find(parsed["names"])
-            if local_match:
-                result = {
-                    "status": "confirmed",
-                    "match": local_match,
-                    "possible": [],
-                    "comparison": {"rows": medicine_dataset.comparable(local_match), "basis": "mrp", "price_status": "local_dataset"},
-                    "warnings": ["Matched against the bundled CSV dataset. Verify the package with a pharmacist."],
-                }
-
-        if result["status"] == "not_identified":
-            return jsonify(status="not_identified", vision=vision, ocr=ocr_info,
-                           warnings=warnings + ["Gemini could not identify this medicine from readable evidence."],
-                           message="The medicine could not be identified. Please provide a clearer photo of the printed packaging.")
-        if ocr.mean_confidence < 0.6 and result["status"] == "confirmed":
-            warnings.append("Text recognition confidence was low. Please check the name against your pack.")
-
+        match = result.get("match")
+        possible = result.get("possible") or []
+        warnings = list(result.get("warnings") or [])
+        warnings.append("AI identification is unverified. Confirm the medicine name and composition on the package or with a pharmacist.")
+        comparison = result.get("comparison") or {"rows": [], "basis": "unavailable", "price_status": "unavailable"}
         return jsonify(
-            status=result["status"], vision=vision, ocr=ocr_info,
-            warnings=warnings + result.get("warnings", []),
-            match=public_match(result["match"]) if result["match"] else None,
-            possible=[public_match(p) for p in result["possible"]],
-            comparison=result["comparison"],
+            status=result.get("status", "not_identified"),
+            vision=vision,
+            ocr=ocr_info,
+            warnings=warnings,
+            match=public_match(match) if match else None,
+            possible=[public_match(p) for p in possible],
+            comparison=comparison,
+            message="The medicine could not be identified from the visible package text." if result.get("status") == "not_identified" else None,
         )
 
     return app
