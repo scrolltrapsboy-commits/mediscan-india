@@ -168,6 +168,18 @@ def create_app(gemini_client=None) -> Flask:
                 comparison={"rows": medicine_dataset.comparable(local_match), "basis": "mrp", "price_status": "local_dataset"},
             )
 
+        def provider_warning(message):
+            return jsonify(
+                status="not_identified",
+                vision=vision,
+                ocr=ocr_info,
+                warnings=warnings + [message],
+                message="The photo was read, but no verified medicine details are available for this name yet.",
+                match=None,
+                possible=[],
+                comparison={"rows": [], "basis": "mrp", "price_status": "unavailable"},
+            )
+
         if isinstance(client, GeminiMedicineClient):
             local_match = medicine_dataset.find(parsed["names"])
             if local_match:
@@ -184,53 +196,45 @@ def create_app(gemini_client=None) -> Flask:
             fallback = local_fallback("Gemini was unavailable; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
-            return jsonify(status="gemini_not_configured", vision=vision, ocr=ocr_info,
-                           warnings=warnings, message=str(exc)), 503
+            return provider_warning(str(exc))
         except GeminiAuthError as exc:
             fallback = local_fallback("Gemini credentials were rejected; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
-            return jsonify(status="gemini_auth_error", vision=vision, ocr=ocr_info,
-                           warnings=warnings, message=str(exc)), 502
+            return provider_warning(str(exc))
         except GeminiModelError as exc:
             fallback = local_fallback("The Gemini model was unavailable; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
-            return jsonify(status="gemini_model_error", vision=vision, ocr=ocr_info,
-                           warnings=warnings, message=str(exc)), 502
+            return provider_warning(str(exc))
         except GeminiQuotaError as exc:
             fallback = local_fallback("Gemini quota was unavailable; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
-            return jsonify(status="gemini_quota_exhausted", vision=vision, ocr=ocr_info,
-                           warnings=warnings, message=str(exc)), 429
+            return provider_warning(str(exc))
         except GeminiSafetyBlocked as exc:
             fallback = local_fallback("Gemini could not analyze the image; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
-            return jsonify(status="gemini_safety_blocked", vision=vision, ocr=ocr_info,
-                           warnings=warnings, message=str(exc)), 422
+            return provider_warning(str(exc))
         except GeminiInvalidResponse as exc:
             fallback = local_fallback("Gemini returned no usable result; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
             log.warning("Gemini returned invalid data: %s", exc)
-            return jsonify(status="gemini_invalid_response", vision=vision, ocr=ocr_info,
-                           warnings=warnings, message=str(exc)), 502
+            return provider_warning(str(exc))
         except GeminiError as exc:
             fallback = local_fallback("Gemini was temporarily unavailable; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
             log.warning("Gemini error: %s", exc)
-            return jsonify(status="gemini_unavailable", vision=vision, ocr=ocr_info,
-                           warnings=warnings, message=str(exc)), 502
+            return provider_warning(str(exc))
         except Exception:
             fallback = local_fallback("Gemini was temporarily unavailable; the result was matched from the bundled local dataset.")
             if fallback:
                 return fallback
             log.exception("unexpected Gemini failure")
-            return jsonify(status="gemini_unavailable", vision=vision, ocr=ocr_info, warnings=warnings,
-                           message="Gemini medicine identification failed. Please try again."), 502
+            return provider_warning("Gemini was temporarily unavailable; the OCR text is shown for verification.")
 
         # Local CSV records provide pack, manufacturer, composition and price data.
         # Gemini remains responsible for reading the image; CSV values are shown as

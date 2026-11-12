@@ -86,7 +86,7 @@ def test_api_not_configured_still_returns_ocr():
         configured = False
     r = post(make(NC(exc=gc.GeminiNotConfigured("x"))), encode(make_label("PARACETAMOL 500")))
     j = r.get_json()
-    assert j["status"] == "gemini_not_configured" and j["ocr"]["candidate_names"]
+    assert r.status_code == 200 and j["status"] == "not_identified" and j["ocr"]["candidate_names"]
 
 
 @pytest.mark.parametrize("exc", [gc.GeminiUnavailable("Gemini could not be reached."),
@@ -94,12 +94,12 @@ def test_api_not_configured_still_returns_ocr():
 def test_api_errors_are_safe(exc):
     r = post(make(FakeClient(exc=exc)), encode(make_label("PARACETAMOL 500")))
     j = r.get_json()
-    assert r.status_code == 502 and j["status"] in {"gemini_unavailable", "gemini_auth_error"} and "Traceback" not in j["message"]
+    assert r.status_code == 200 and j["status"] == "not_identified" and "Traceback" not in j["message"]
 
 
 def test_unexpected_api_failure_hides_details():
     r = post(make(FakeClient(exc=RuntimeError("secret internal path /srv/key"))), encode(make_label("PARACETAMOL 500")))
-    assert r.status_code == 502 and "secret" not in r.get_data(as_text=True)
+    assert r.status_code == 200 and "secret" not in r.get_data(as_text=True)
 
 
 def test_uncertain_not_auto_confirmed():
