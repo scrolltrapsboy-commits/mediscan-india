@@ -9,11 +9,23 @@ services:
       python -m pip install -r requirements.txt &&
       python -m pip install --no-deps rapidocr-onnxruntime==1.2.3 &&
       python -c "from rapidocr_onnxruntime import RapidOCR; print('RapidOCR package import OK')"
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 120
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: NUMEXPR_NUM_THREADS
+        value: "1"
+      - key: ORT_INTRA_OP_NUM_THREADS
+        value: "1"
+      - key: ORT_INTER_OP_NUM_THREADS
+        value: "1"
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
