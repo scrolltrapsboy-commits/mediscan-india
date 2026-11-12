@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-MAX_SIDE = 2400          # only larger images are down-scaled (memory safety)
+MAX_SIDE = 2000          # only larger images are down-scaled (memory safety)
 MIN_SIDE = 1200          # smaller images are up-scaled for OCR readability
 BLUR_KERNEL = (3, 3)     # small kernel: removes sensor noise, keeps text strokes
 CANNY_LOW, CANNY_HIGH = 50, 150
@@ -113,15 +113,18 @@ def _resize_for_processing(img: np.ndarray) -> np.ndarray:
 
 
 def _sharpness(gray: np.ndarray) -> float:
-    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    return float(cv2.Laplacian(gray, cv2.CV_32F).var())
 
 
 def _noise_sigma(gray: np.ndarray) -> float:
     """Immerkaer's fast noise-level estimate."""
-    kernel = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float64)
+    # Float32 halves the temporary-buffer footprint versus float64 while
+    # retaining ample precision for this image-quality heuristic.
+    kernel = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float32)
     h, w = gray.shape
-    conv = cv2.filter2D(gray.astype(np.float64), -1, kernel)
-    return float(np.sqrt(np.pi / 2.0) * np.abs(conv[1:-1, 1:-1]).sum() / (6.0 * (w - 2) * (h - 2)))
+    conv = cv2.filter2D(gray, cv2.CV_32F, kernel)
+    total = np.abs(conv[1:-1, 1:-1]).sum(dtype=np.float64)
+    return float(np.sqrt(np.pi / 2.0) * total / (6.0 * (w - 2) * (h - 2)))
 
 
 def _readability_score(gray: np.ndarray) -> float:
@@ -195,13 +198,16 @@ def preprocess_image(img: np.ndarray) -> ProcessedImage:
     edges = detect_edges(blurred)
     sharp = _sharpness(gray)
     candidates, scores, selected, roi_found = prepare_for_ocr(gray, blurred, edges)
+    edge_density = round(float(np.count_nonzero(edges)) / edges.size, 4)
+    # candidates retain only the grayscale/blurred arrays they need.
+    del edges, work
 
     return ProcessedImage(
         width=orig_w,
         height=orig_h,
         sharpness=round(sharp, 2),
         is_blurry=sharp < BLUR_THRESHOLD,
-        edge_density=round(float(np.count_nonzero(edges)) / edges.size, 4),
+        edge_density=edge_density,
         scores={k: round(v, 3) for k, v in scores.items()},
         selected=selected,
         roi_found=roi_found,
