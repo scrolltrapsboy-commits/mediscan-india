@@ -100,6 +100,18 @@ def create_app(gemini_client=None) -> Flask:
     def too_large(_e):
         return jsonify(status="error", message="The image is too large. Please use a file under 10 MB."), 413
 
+    @app.errorhandler(Exception)
+    def unexpected_error(exc):
+        # Keep API failures machine-readable; otherwise Flask's default HTML
+        # error page makes the browser report "unreadable response".
+        from werkzeug.exceptions import HTTPException
+        if isinstance(exc, HTTPException):
+            return jsonify(status="error", message=exc.description), exc.code
+        log.exception("Unhandled application error")
+        if request.path.startswith("/api/"):
+            return jsonify(status="error", message="The scan failed on the server. Check Render logs for the underlying error."), 500
+        return jsonify(status="error", message="The page could not be served."), 500
+
     @app.post("/api/identify")
     def identify():
         upload = request.files.get("image")
