@@ -4,7 +4,7 @@
 
   var MAX_BYTES = 10 * 1024 * 1024;
   var ALLOWED = ["image/jpeg", "image/png", "image/webp"];
-  var REQUEST_TIMEOUT_MS = 15000;
+  var REQUEST_TIMEOUT_MS = 30000;
   var UNAVAILABLE = "Information unavailable";
 
   var $ = function (id) { return document.getElementById(id); };
@@ -207,7 +207,7 @@
       handleResponse(res.ok, data);
     } catch (e) {
       if (cancelled) setStatus("info", "Identification cancelled.");
-      else if (timedOut) setStatus("error", "Identification exceeded 15 seconds. Please retry with a clear, well-lit photo.");
+      else if (timedOut) setStatus("warn", "Identification is taking longer than expected. Please try again with a clearer photo.");
       else setStatus("error", e && e.message && e.message !== "Failed to fetch" ? e.message : "Could not reach the server. Check your connection and try again.");
     } finally {
       clearTimeout(timer);

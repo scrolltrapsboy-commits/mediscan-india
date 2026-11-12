@@ -143,6 +143,11 @@ def _catalog() -> tuple[list[dict], dict[str, list[int]], dict[frozenset[str], l
     return rows, by_name, by_composition, by_token
 
 
+def warm_catalog() -> None:
+    """Load the local catalog once during startup instead of on the first scan."""
+    _catalog()
+
+
 def _row_product(row: dict) -> dict:
     composition = _composition(row)
     price = _money(row.get("price") or row.get("price(₹)"))

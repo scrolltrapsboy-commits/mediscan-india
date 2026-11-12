@@ -50,6 +50,8 @@ def create_app(gemini_client=None) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + 1024 * 64
     client = gemini_client or GeminiMedicineClient()
+    if isinstance(client, GeminiMedicineClient):
+        medicine_dataset.warm_catalog()
 
     @app.after_request
     def security_headers(resp):
@@ -165,6 +167,11 @@ def create_app(gemini_client=None) -> Flask:
                 possible=[],
                 comparison={"rows": medicine_dataset.comparable(local_match), "basis": "mrp", "price_status": "local_dataset"},
             )
+
+        if isinstance(client, GeminiMedicineClient):
+            local_match = medicine_dataset.find(parsed["names"])
+            if local_match:
+                return local_fallback("Matched from the bundled local medicine dataset.")
 
         # ---- Gemini ----
         try:
