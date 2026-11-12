@@ -287,3 +287,139 @@ def enrich_result(result: dict, names: list[str]) -> dict:
         result["match"] = match
         result["comparison"] = {"rows": local_rows, "basis": "mrp", "price_status": "local_dataset"} if local_rows else {"rows": [], "basis": "mrp", "price_status": "unavailable"}
     return result
+
+
+def _stream_rows(path: Path):
+    """Yield CSV records without retaining the full medicine dataset in RAM."""
+    if not path.exists():
+        return
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            first = handle.readline()
+            # Git LFS pointer files are not usable datasets. Never parse them as CSV.
+            if first.startswith("version https://git-lfs.github.com/spec/v1"):
+                return
+            handle.seek(0)
+            yield from csv.DictReader(handle)
+    except (OSError, UnicodeError, csv.Error):
+        return
+
+
+def _active_dataset_path() -> Optional[Path]:
+    for path in (DETAIL_FILE, CATALOG_FILE):
+        if path.exists():
+            try:
+                with path.open("r", encoding="utf-8-sig") as handle:
+                    if not handle.readline().startswith("version https://git-lfs.github.com/spec/v1"):
+                        return path
+            except (OSError, UnicodeError):
+                continue
+    return None
+
+
+def enrich_result_streaming(result: dict, names: list[str]) -> dict:
+    """Enrich Gemini output from the CSV with bounded memory.
+
+    The scan performs two streaming passes: one to locate the best name match,
+    then one to collect same-composition/same-form alternatives. It never builds
+    the large in-memory indexes used by the legacy _catalog() implementation.
+    """
+    path = _active_dataset_path()
+    if path is None:
+        result.setdefault("warnings", []).append(
+            "The medicine CSV dataset is unavailable on this server; dataset details and price comparison could not be loaded."
+        )
+        return result
+
+    queries = [_clean(x) for x in names if _clean(x)]
+    current = result.get("match") or {}
+    if not queries and current.get("name"):
+        queries = [_clean(current["name"])]
+    if not queries:
+        return result
+
+    best = None
+    best_score = 0.0
+    for row in _stream_rows(path):
+        row_name = _clean(row.get("name"))
+        if not row_name:
+            continue
+        for query in queries[:5]:
+            if row_name == query:
+                best, best_score = row, 1.0
+                break
+            score = SequenceMatcher(None, query, row_name).ratio()
+            if query in row_name or row_name in query:
+                score = max(score, 0.86)
+            if score > best_score:
+                best, best_score = row, score
+        if best_score == 1.0:
+            break
+
+    if best is None or best_score < 0.78:
+        result.setdefault("warnings", []).append(
+            "No sufficiently close medicine-name match was found in the local CSV dataset. Unavailable fields have not been guessed."
+        )
+        return result
+
+    local = _row_product(best)
+    # Preserve image-derived brand identification, but fill fields that are
+    # absent from the image/Gemini response using the matched dataset record.
+    merged = dict(local)
+    for key, value in current.items():
+        if value not in (None, "", [], {}) and key not in {
+            "packagings", "uses", "side_effects", "interactions", "manufacturer",
+            "composition", "composition_text", "primary_uses", "common_side_effects",
+            "clinical_precautions", "drug_interactions", "ingredients"
+        }:
+            merged[key] = value
+    for key in ("manufacturer", "composition", "composition_text", "ingredients",
+                "packagings", "uses", "primary_uses", "side_effects",
+                "common_side_effects", "clinical_precautions", "interactions",
+                "drug_interactions", "prescription_classification", "schedule",
+                "image_url"):
+        if current.get(key) not in (None, "", [], {}):
+            # Keep image-supported details when present; otherwise use CSV.
+            if key in {"manufacturer", "composition", "composition_text", "ingredients", "packagings"}:
+                continue
+            merged[key] = current[key]
+    merged["data_source"] = "Gemini image identification + local CSV dataset"
+    merged["dataset_match"] = True
+    merged["verification_status"] = "unverified"
+    result["match"] = merged
+
+    composition_key = _key(_composition(best))
+    base_form = _form(best.get("name") or "")
+    rows = []
+    base_pack = (merged.get("packagings") or [{}])[0]
+    base_pack = dict(base_pack)
+    rows.append({
+        "name": merged.get("name"), "manufacturer": merged.get("manufacturer"),
+        "pack_label": base_pack.get("label"), "quantity": base_pack.get("quantity"),
+        "mrp": base_pack.get("mrp"),
+        "per_unit": calculate_per_unit_price(base_pack.get("mrp"), base_pack.get("quantity"), base_pack.get("unit")),
+        "is_scanned": True, "is_lowest": False,
+    })
+    if composition_key and base_form:
+        for row in _stream_rows(path):
+            if _clean(row.get("name")) == _clean(best.get("name")):
+                continue
+            if _key(_composition(row)) != composition_key or _form(row.get("name") or "") != base_form:
+                continue
+            product = _row_product(row)
+            pack = (product.get("packagings") or [{}])[0]
+            rows.append({
+                "name": product.get("name"), "manufacturer": product.get("manufacturer"),
+                "pack_label": pack.get("label"), "quantity": pack.get("quantity"),
+                "mrp": pack.get("mrp"),
+                "per_unit": calculate_per_unit_price(pack.get("mrp"), pack.get("quantity"), pack.get("unit")),
+                "is_scanned": False, "is_lowest": False,
+            })
+            if len(rows) >= 10:
+                break
+    rows.sort(key=lambda item: item.get("mrp") is None)
+    result["comparison"] = {
+        "rows": rows, "basis": "same active composition and dosage form",
+        "price_status": "local_dataset" if any(x.get("mrp") is not None for x in rows) else "price_unavailable"
+    }
+    return result
