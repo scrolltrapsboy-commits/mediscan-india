@@ -316,6 +316,7 @@
     var badges = "";
     if (p.schedule) badges += '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant">' + esc(p.schedule) + "</span>";
     if (p.dosage_form) badges += '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant">' + esc(p.dosage_form) + "</span>";
+    if (p.dataset_match) badges += '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant">CSV details</span>';
     badges += confirmed
       ? '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-[#FFFBEB] text-[#92400E] border border-[#FCD34D] flex items-center gap-1"><span class="material-symbols-outlined text-[13px]">auto_awesome</span> AI-assisted · unverified</span>'
       : '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-[#FFFBEB] text-[#92400E] border border-[#FCD34D]">Possible match - not confirmed</span>';
@@ -331,7 +332,10 @@
       fact("Brand Name", p.name) + fact("Generic Name", p.generic_name) + fact("Strength", p.strength || strengthText(p)) + fact("Manufacturer", p.manufacturer) +
       fact("Dosage Form", p.dosage_form) + fact("Packaging", pack && pack.label) + fact("MRP", mrp ? rupee(mrp.mrp) : null);
 
-    var html = ingredientsSection(p.ingredients, p.composition) +
+    var explanation = p.ai_explanation
+      ? '<div class="rounded-lg bg-surface-container-low p-space-md"><span class="font-label-md text-label-md text-on-surface uppercase tracking-wider flex items-center gap-1.5"><span class="material-symbols-outlined text-primary text-[18px]">auto_awesome</span>AI explanation of CSV details</span><p class="font-body-md text-body-md text-on-surface-variant leading-relaxed mt-2 whitespace-pre-line">' + esc(p.ai_explanation) + '</p><p class="font-body-sm text-outline mt-2">Based on the matched local CSV record; not medical advice.</p></div>'
+      : "";
+    var html = explanation + ingredientsSection(p.ingredients, p.composition) +
       infoSection("info", "text-primary", "Primary Uses", p.primary_uses || p.uses) +
       infoSection("info", "text-tertiary", "Common Side Effects", p.common_side_effects || p.side_effects) +
       infoSection("warning", "text-error", "Serious Side Effects", p.serious_side_effects) +
