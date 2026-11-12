@@ -87,13 +87,9 @@ def create_app(gemini_client=None) -> Flask:
 
     @app.get("/ocr-healthz")
     def ocr_healthz():
-        # Explicit diagnostic endpoint that loads the OCR engine once.
-        try:
-            ocr_service._get_engine()
-            return jsonify(status="ok", ocr_engine="ready")
-        except ocr_service.OcrUnavailable:
-            log.exception("OCR readiness check failed")
-            return jsonify(status="error", ocr_engine="unavailable"), 503
+        # OCR is intentionally not loaded on the 512 MiB production instance.
+        return jsonify(status="disabled", ocr_engine="not_used",
+                       message="Medicine package text is analyzed directly from the image by Gemini.")
 
     @app.errorhandler(413)
     def too_large(_e):
