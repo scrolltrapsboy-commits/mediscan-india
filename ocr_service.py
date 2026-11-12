@@ -13,6 +13,7 @@ MIN_LINE_CONFIDENCE = 0.5
 
 _engine = None
 _engine_lock = threading.Lock()
+_inference_lock = threading.Lock()
 
 
 class OcrUnavailable(RuntimeError):
@@ -64,7 +65,10 @@ def run_ocr_on_image(image) -> list:
     """Run the OCR engine on one image array and return OcrLine objects."""
     engine = _get_engine()
     try:
-        raw, _ = engine(image)
+        # RapidOCR/ONNX sessions are reused and inference is serialized to avoid
+        # concurrent activation buffers on the 512 MiB Render instance.
+        with _inference_lock:
+            raw, _ = engine(image)
     except Exception as exc:
         raise OcrUnavailable("OCR failed while reading the image.") from exc
     lines = []
