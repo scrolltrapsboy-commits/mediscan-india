@@ -349,3 +349,37 @@ class GeminiMedicineClient:
             raise GeminiInvalidResponse("Gemini returned invalid structured data.") from exc
         except Exception as exc:
             raise self._map_exception(exc) from exc
+
+
+    def explain_dataset_details(self, medicine: dict) -> Optional[str]:
+        """Explain only the supplied CSV facts in plain language; do not add medical claims."""
+        if not medicine:
+            return None
+        facts = {
+            "name": medicine.get("name"),
+            "generic_name": medicine.get("generic_name"),
+            "composition": medicine.get("composition"),
+            "manufacturer": medicine.get("manufacturer"),
+            "dosage_form": medicine.get("dosage_form"),
+            "uses_from_dataset": medicine.get("primary_uses") or medicine.get("uses"),
+            "common_side_effects_from_dataset": medicine.get("common_side_effects") or medicine.get("side_effects"),
+            "precautions_from_dataset": medicine.get("clinical_precautions") or medicine.get("precautions"),
+            "prescription_classification_from_dataset": medicine.get("prescription_classification"),
+            "packaging_and_price_from_dataset": medicine.get("packagings"),
+        }
+        try:
+            from google.genai import types
+            response = self._client().models.generate_content(
+                model=self.model,
+                contents=[
+                    "Explain the following medicine-record facts in plain, simple English for a general Indian audience. "
+                    "Use only the supplied facts. Do not infer a diagnosis, dose, treatment plan, safety guarantee, "
+                    "or substitution recommendation. If a field is empty, say it is not available rather than guessing. "
+                    "Clearly introduce this as an AI explanation of unverified local dataset information. "
+                    "Keep it concise and organize it into short paragraphs. Data: " + json.dumps(facts, ensure_ascii=False)
+                ],
+                config=types.GenerateContentConfig(temperature=0.2),
+            )
+            return _text(getattr(response, "text", None))
+        except Exception as exc:
+            raise self._map_exception(exc) from exc
