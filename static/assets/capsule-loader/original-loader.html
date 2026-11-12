@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+<!-- Code by Keyframe Tech Solutions -->
+<head>
+	<title>Creative Medicine Capsule Loading Animation using HTML CSS JavaScript | CSS Loader Animation Tutorial</title>
+	<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400..700&display=swap" rel="stylesheet" />
+	<style>
+	*,
+	::after,
+	::before {
+	  box-sizing: border-box;
+	}
+
+	.preloader {
+	  position: fixed;
+	  inset: 0;
+	  z-index: 999;
+	  background-color: #000;
+	}
+
+	.preloader-inner {
+	  position: absolute;
+	  left: 50%;
+	  top: 50%;
+	  transform: translate(-50%, -50%);
+
+	  display: flex;
+	  flex-direction: column;
+	  align-items: center;
+	}
+
+	/* Heading */
+	.preloader-inner h1 {
+	  color: #fff;
+	  font-size: 40px;
+	  font-weight: 600;
+	  margin: 0 0 25px 0;
+	  text-align: center;
+	  font-family: "Dancing Script", cursive;
+	  white-space: nowrap;
+	}
+
+	.content {
+	  display: flex;
+	  align-items: center;
+	  justify-content: center;
+	}
+
+	.pill {
+	  width: 55px;
+	  height: 120px;
+	  display: flex;
+	  align-items: center;
+	  justify-content: center;
+	  flex-direction: column;
+	  transform: rotate(180deg);
+	  animation: spin 4s linear infinite;
+	}
+
+	.medicine {
+	  position: absolute;
+	  width: 50px;
+	  height: 60px;
+	  display: flex;
+	  align-items: center;
+	  justify-content: center;
+	  flex-wrap: wrap;
+	  overflow: hidden;
+	}
+
+	.medicine i {
+	  width: 9px;
+	  height: 9px;
+	  background: #5959eb;
+	  border-radius: 50%;
+	  position: absolute;
+	  animation: medicine-dust 1.75s ease infinite alternate;
+	}
+
+	.medicine i:nth-child(2n + 2) {
+	  width: 10px;
+	  height: 10px;
+	  margin-top: 40px;
+	  margin-right: -14px;
+	  animation-delay: -0.2s;
+	}
+
+	.medicine i:nth-child(3n + 3) {
+	  width: 15px;
+	  height: 15px;
+	  margin-top: 35px;
+	  margin-right: 20px;
+	  animation-delay: -0.33s;
+	}
+
+	.medicine i:nth-child(4) {
+	  margin-top: -45px;
+	  margin-right: 20px;
+	  animation-delay: -0.4s;
+	}
+
+	.medicine i:nth-child(5) {
+	  margin-top: 45px;
+	  margin-right: -35px;
+	  animation-delay: -0.5s;
+	}
+
+	.medicine i:nth-child(6) {
+	  margin-top: 0;
+	  margin-right: -30px;
+	  animation-delay: -0.66s;
+	}
+
+	.medicine i:nth-child(7) {
+	  margin-top: -10px;
+	  margin-right: 20px;
+	  animation-delay: -0.7s;
+	}
+
+	.medicine i:nth-child(8) {
+	  margin-top: 54px;
+	  margin-right: -10px;
+	  animation-delay: -0.8s;
+	}
+
+	.medicine i:nth-child(9) {
+	  margin-top: 36px;
+	  margin-right: -20px;
+	  animation-delay: -0.99s;
+	}
+
+	.medicine i:nth-child(10) {
+	  margin-top: -54px;
+	  margin-right: 0;
+	  animation-delay: -1.11s;
+	}
+
+	.medicine i:nth-child(n + 10) {
+	  width: 5px;
+	  height: 5px;
+	}
+
+	.medicine i:nth-child(11) {
+	  margin-top: 50px;
+	  margin-right: 20px;
+	  animation-delay: -1.125s;
+	}
+
+	.medicine i:nth-child(12) {
+	  margin-top: -50px;
+	  margin-right: -20px;
+	  animation-delay: -1.275s;
+	}
+
+	.side {
+	  position: relative;
+	  overflow: hidden;
+	  width: 50px;
+	  height: 60px;
+	  background: #19a8a3;
+	  border-radius: 40px 40px 0 0;
+	}
+
+	.side::before {
+	  content: "";
+	  position: absolute;
+	  width: 10px;
+	  height: 90px;
+	  bottom: 0;
+	  right: 1.5vmin;
+	  background: rgba(255, 255, 255, 0.133333);
+	  border-radius: 10px 10px 0 0;
+	  animation: shine 1s ease-out -1s infinite alternate-reverse;
+	}
+
+	.side::after {
+	  content: "";
+	  position: absolute;
+	  width: 100%;
+	  height: 100%;
+	  bottom: 0;
+	  left: 0;
+	  border-radius: 6vmin 6vmin 0 0;
+	  border: 10px solid rgba(0, 0, 0, 0.13);
+	  border-bottom-color: transparent;
+	  border-bottom-width: 0;
+	  border-top-width: 10px;
+	  animation: shadow 1s ease -1s infinite alternate-reverse;
+	}
+
+	.side + .side {
+	  background: #136282;
+	  border-radius: 0 0 40px 40px;
+	  border-top: 5px solid #d8698a;
+	  animation: open 2s ease-in-out infinite;
+	}
+
+	.side + .side::before {
+	  bottom: auto;
+	  top: 0;
+	  border-radius: 0 0 10px 10px;
+	}
+
+	.side + .side::after {
+	  bottom: auto;
+	  top: 0;
+	  border-radius: 0 0 40px 40px;
+	  border-top-color: transparent;
+	  border-top-width: 0;
+	  border-bottom-width: 9px;
+	}
+
+	/* Animations */
+
+	@keyframes spin {
+	  100% {
+		transform: rotate(-540deg);
+	  }
+	}
+
+	@keyframes open {
+	  0%,
+	  20%,
+	  80%,
+	  100% {
+		margin-top: 0;
+	  }
+
+	  30%,
+	  70% {
+		margin-top: 40px;
+	  }
+	}
+
+	@keyframes shine {
+	  0%,
+	  46% {
+		right: 1.5vmin;
+	  }
+
+	  54%,
+	  100% {
+		right: 7.5vmin;
+	  }
+	}
+
+	@keyframes shadow {
+	  0%,
+	  49.999% {
+		transform: rotateY(0deg);
+		left: 0;
+	  }
+
+	  50%,
+	  100% {
+		transform: rotateY(180deg);
+		left: -3vmin;
+	  }
+	}
+
+	@keyframes medicine-dust {
+	  0%,
+	  100% {
+		transform: translate3d(0, 0, -0.1vmin);
+	  }
+
+	  25% {
+		transform: translate3d(0.25vmin, 5vmin, 0);
+	  }
+
+	  75% {
+		transform: translate3d(-0.1vmin, -4vmin, 0.25vmin);
+	  }
+	}
+
+	/* Mobile Responsive */
+
+	@media (max-width: 600px) {
+	  .preloader-inner h1 {
+		font-size: 18px;
+		white-space: normal;
+		width: 280px;
+	  }
+	}
+	</style>
+</head>
+<body>
+
+<div class="preloader">
+  <div class="preloader-inner">
+    <h1>Medicine Capsule Loader <br>Animation</h1>
+    <div class="content">
+      <div class="pill">
+        <div class="medicine">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+
+        <div class="side top"></div>
+        <div class="side bottom"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

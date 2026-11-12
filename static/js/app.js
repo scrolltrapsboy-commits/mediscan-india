@@ -1,0 +1,401 @@
+/* MediScan India - main UI logic (upload, camera flow, identify, rendering). */
+(function () {
+  "use strict";
+
+  var MAX_BYTES = 10 * 1024 * 1024;
+  var ALLOWED = ["image/jpeg", "image/png", "image/webp"];
+  var REQUEST_TIMEOUT_MS = 10000;
+  var UNAVAILABLE = "Information unavailable";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var els = {
+    upload: $("uploadTrigger"), cameraBtn: $("cameraTrigger"), cameraBtnText: $("cameraTriggerText"),
+    file: $("fileInput"), placeholder: $("previewPlaceholder"), img: $("stripPreview"), video: $("cameraVideo"),
+    bar: $("previewBar"), fileName: $("fileName"), fileSize: $("fileSize"), actions: $("previewActions"),
+    qIcon: $("qualityIcon"), qText: $("qualityText"), ocrConf: $("ocrConfidence"),
+    statusBox: $("statusBox"), statusIcon: $("statusIcon"), statusText: $("statusText"),
+    scan: $("scanActionButton"), scanText: $("scanBtnText"),
+    resEmpty: $("resultEmpty"), resContent: $("resultContent"), badges: $("resultBadges"),
+    resName: $("resName"), resGeneric: $("resGeneric"), resImage: $("resImage"),
+    facts: $("resFacts"), sections: $("resSections"),
+    priceBody: $("priceBody"), priceEmpty: $("priceEmpty"), standard: $("formulationStandard")
+  };
+
+  var state = { blob: null, name: "", source: null, objectUrl: null, mode: "idle", busy: false, controller: null, possible: [] };
+
+  /* ---------- helpers ---------- */
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmtSize(b) { return b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB"; }
+  function rupee(v) { return v == null ? UNAVAILABLE : "₹" + Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+  function setStatus(kind, text) {
+    if (!text) { els.statusBox.classList.add("hidden"); return; }
+    var styles = {
+      error: ["bg-error-container", "text-on-error-container", "border-[#FDA4AF]", "error"],
+      warn: ["bg-[#FFFBEB]", "text-[#92400E]", "border-[#FCD34D]", "warning"],
+      info: ["bg-surface-container-lowest", "text-on-surface-variant", "border-surface-container-high", "info"]
+    };
+    els.statusBox.className = "rounded-lg px-space-md py-space-sm font-body-sm text-body-sm flex gap-2 items-start border " +
+      styles[kind].slice(0, 3).join(" ");
+    els.statusIcon.textContent = styles[kind][3];
+    els.statusText.textContent = text;
+  }
+
+  function pvButton(label, icon, handler, primary) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "pv-btn" + (primary ? " primary" : "");
+    b.innerHTML = '<span class="material-symbols-outlined">' + icon + "</span>" + esc(label);
+    b.addEventListener("click", handler);
+    return b;
+  }
+
+  function setBusy(busy) {
+    state.busy = busy;
+    els.upload.disabled = busy; els.cameraBtn.disabled = busy;
+    [els.upload, els.cameraBtn].forEach(function (b) { b.classList.toggle("opacity-50", busy); b.classList.toggle("pointer-events-none", busy); });
+    els.scan.disabled = busy || !state.blob || state.mode !== "image";
+    els.scanText.textContent = busy ? "Analysing medicine..." : (state.hasResult ? "Re-Identify Medicine" : "Identify Medicine");
+    els.actions.querySelectorAll("button").forEach(function (b) { b.disabled = busy; });
+  }
+
+  /* ---------- preview area states ---------- */
+  function showPlaceholder() {
+    els.placeholder.classList.remove("hidden");
+    els.img.classList.add("hidden"); els.video.classList.add("hidden"); els.bar.classList.add("hidden");
+  }
+
+  function revokeUrl() { if (state.objectUrl) { URL.revokeObjectURL(state.objectUrl); state.objectUrl = null; } }
+
+  function clearImage() {
+    revokeUrl();
+    state.blob = null; state.name = ""; state.source = null; state.mode = "idle"; state.hasResult = false;
+    els.img.removeAttribute("src");
+    els.actions.innerHTML = "";
+    showPlaceholder();
+    els.qIcon.classList.add("hidden"); els.qText.textContent = ""; els.ocrConf.textContent = "";
+    setStatus(null);
+    resetResults();
+    els.scan.disabled = true; els.scanText.textContent = "Identify Medicine";
+  }
+
+  function setImage(blob, name, source, dims) {
+    revokeUrl();
+    MediCamera.stop();
+    els.cameraBtnText.textContent = "Open Camera";
+    state.blob = blob; state.name = name; state.source = source; state.mode = "image"; state.hasResult = false;
+    state.objectUrl = URL.createObjectURL(blob);
+    els.img.src = state.objectUrl;
+    els.img.classList.remove("hidden"); els.placeholder.classList.add("hidden"); els.video.classList.add("hidden");
+    els.bar.classList.remove("hidden");
+    els.fileName.textContent = name; els.fileSize.textContent = fmtSize(blob.size);
+    els.actions.innerHTML = "";
+    if (source === "camera") els.actions.appendChild(pvButton("Retake", "replay", openCamera));
+    els.actions.appendChild(pvButton("Remove", "delete", clearImage));
+    els.qIcon.classList.add("hidden"); els.ocrConf.textContent = "";
+    els.qText.textContent = dims ? dims.width + " × " + dims.height + " px" : "";
+    if (!dims) {
+      var probe = new Image();
+      probe.onload = function () { if (state.blob === blob) els.qText.textContent = probe.naturalWidth + " × " + probe.naturalHeight + " px"; };
+      probe.src = state.objectUrl;
+    }
+    setStatus(null);
+    resetResults();
+    setBusy(false);
+  }
+
+  /* ---------- upload ---------- */
+  els.upload.addEventListener("click", function () { if (!state.busy) els.file.click(); });
+  els.file.addEventListener("change", function () {
+    var f = els.file.files && els.file.files[0];
+    els.file.value = "";
+    if (!f) return;
+    if (ALLOWED.indexOf(f.type) === -1) { setStatus("error", "Unsupported file type. Please choose a JPG, PNG or WEBP image."); return; }
+    if (f.size > MAX_BYTES) { setStatus("error", "That image is " + fmtSize(f.size) + ". Please choose one under 10 MB."); return; }
+    if (f.size === 0) { setStatus("error", "That file is empty."); return; }
+    if (MediCamera.isActive()) closeCamera();
+    setImage(f, f.name, "upload");
+  });
+
+  /* ---------- camera ---------- */
+  function cameraControls(info) {
+    els.actions.innerHTML = "";
+    els.actions.appendChild(pvButton("Capture", "photo_camera", takePhoto, true));
+    if (info && info.canSwitch) els.actions.appendChild(pvButton("Switch", "cameraswitch", switchCam));
+    els.actions.appendChild(pvButton("Close", "close", closeCamera));
+  }
+
+  function showCameraInfo(info) {
+    els.fileName.textContent = "Live camera";
+    els.fileSize.textContent = info && info.width ? info.width + " × " + info.height : "";
+  }
+
+  async function openCamera() {
+    if (state.busy) return;
+    setStatus(null);
+    try {
+      var info = await MediCamera.start();
+      state.mode = "camera";
+      revokeUrl();
+      els.img.classList.add("hidden"); els.placeholder.classList.add("hidden");
+      els.video.classList.remove("hidden"); els.bar.classList.remove("hidden");
+      showCameraInfo(info); cameraControls(info);
+      els.cameraBtnText.textContent = "Close Camera";
+      els.qIcon.classList.add("hidden"); els.qText.textContent = "Frame the printed medicine name and hold steady"; els.ocrConf.textContent = "";
+      els.scan.disabled = true;
+    } catch (e) {
+      MediCamera.stop();
+      setStatus("error", e.message || "The camera could not be started.");
+    }
+  }
+
+  function closeCamera() {
+    MediCamera.stop();
+    els.video.classList.add("hidden");
+    els.cameraBtnText.textContent = "Open Camera";
+    if (state.blob) { // go back to the previous photo
+      state.mode = "image";
+      els.img.classList.remove("hidden"); els.bar.classList.remove("hidden");
+      els.fileName.textContent = state.name; els.fileSize.textContent = fmtSize(state.blob.size);
+      els.actions.innerHTML = "";
+      if (state.source === "camera") els.actions.appendChild(pvButton("Retake", "replay", openCamera));
+      els.actions.appendChild(pvButton("Remove", "delete", clearImage));
+      els.qText.textContent = "";
+    } else {
+      state.mode = "idle"; showPlaceholder(); els.qText.textContent = "";
+    }
+    setBusy(false);
+  }
+
+  async function switchCam() {
+    try { var info = await MediCamera.switchCamera(); showCameraInfo(info); cameraControls(info); }
+    catch (e) { setStatus("error", e.message); }
+  }
+
+  async function takePhoto() {
+    try {
+      var shot = await MediCamera.capture(0.95);
+      var stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+      setImage(shot.blob, "camera_" + stamp + ".jpg", "camera", { width: shot.width, height: shot.height });
+    } catch (e) { setStatus("error", e.message); }
+  }
+
+  els.cameraBtn.addEventListener("click", function () { MediCamera.isActive() ? closeCamera() : openCamera(); });
+
+  /* ---------- identify ---------- */
+  function cancelRequest() { if (state.controller) state.controller.abort(); }
+
+  async function identify() {
+    if (state.busy || !state.blob || state.mode !== "image") return;
+    setStatus(null);
+    setBusy(true);
+    var timedOut = false, cancelled = false;
+    var controller = new AbortController();
+    state.controller = controller;
+    var timer = setTimeout(function () { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+    CapsuleLoader.show("Analysing medicine...", function () { cancelled = true; controller.abort(); });
+    try {
+      var fd = new FormData();
+      fd.append("image", state.blob, state.name);
+      var res = await fetch("/api/identify", { method: "POST", body: fd, signal: controller.signal });
+      var data = await res.json().catch(function () { return null; });
+      if (!data) throw new Error("The server sent an unreadable response.");
+      handleResponse(res.ok, data);
+    } catch (e) {
+      if (cancelled) setStatus("info", "Identification cancelled.");
+      else if (timedOut) setStatus("error", "Identification exceeded 10 seconds. Please retry with a clear, well-lit photo.");
+      else setStatus("error", e && e.message && e.message !== "Failed to fetch" ? e.message : "Could not reach the server. Check your connection and try again.");
+    } finally {
+      clearTimeout(timer);
+      state.controller = null;
+      CapsuleLoader.hide();
+      setBusy(false);
+    }
+  }
+
+  function showVision(data) {
+    var v = data.vision;
+    if (v) {
+      els.qIcon.classList.remove("hidden");
+      els.qIcon.textContent = v.is_blurry ? "warning" : "check_circle";
+      els.qIcon.className = "material-symbols-outlined text-[16px] " + (v.is_blurry ? "text-[#D97706]" : "text-secondary");
+      els.qText.textContent = (v.is_blurry ? "Low focus detected" : "Focus check passed") + " · " + v.width + " × " + v.height + " px";
+    }
+    if (data.ocr) els.ocrConf.textContent = "OCR Confidence: " + data.ocr.confidence + "%";
+  }
+
+  function handleResponse(ok, data) {
+    showVision(data);
+    var status = data.status;
+    if (!ok && status !== "possible" && status !== "confirmed" && status !== "not_identified") { setStatus("error", data.message || "Something went wrong."); return; }
+    state.hasResult = true;
+    if (status === "confirmed" && data.match) {
+      renderMedicine(data.match, true);
+      renderComparison(data.comparison, data.match);
+      if (data.warnings && data.warnings.length) setStatus("warn", data.warnings.join(" "));
+      return;
+    }
+    resetResults();
+    if (status === "possible") {
+      state.possible = data.possible || [];
+      renderPossible(state.possible, data.ocr);
+      setStatus("warn", "We could not confirm this medicine from the photo. Check the possible matches against your pack.");
+      return;
+    }
+    var kind = status.indexOf("gemini_") === 0 ? "error" : "warn";
+    var msg = data.message || "The medicine could not be identified.";
+    if (data.warnings && data.warnings.length) msg += " " + data.warnings.join(" ");
+    setStatus(kind, msg);
+    if (status === "gemini_not_configured" && data.ocr) renderOcrOnly(data.ocr);
+  }
+
+  /* ---------- rendering ---------- */
+  function resetResults() {
+    els.resContent.classList.add("hidden"); els.resEmpty.classList.remove("hidden");
+    els.resEmpty.innerHTML = '<span class="material-symbols-outlined text-[36px] text-outline">pill</span>' +
+      '<h3 class="font-headline-md text-headline-md text-on-surface tracking-tight">Medicine details will appear here</h3>' +
+      '<p class="font-body-md text-body-md">Add a clear photo of the printed name on a strip, box or bottle, then choose Identify Medicine. AI results are unverified and do not replace a pharmacist or doctor.</p>';
+    els.priceBody.innerHTML = ""; els.priceEmpty.classList.remove("hidden"); els.standard.textContent = "";
+    els.priceEmpty.textContent = "Identify a medicine to compare equivalent products. A comparison is shown only when the database returns matching salts, strength and dosage form with known prices.";
+  }
+
+  function renderOcrOnly(ocr) {
+    var lines = (ocr.candidate_names || []).map(esc).join(", ") || "none";
+    els.resEmpty.innerHTML = '<span class="material-symbols-outlined text-[36px] text-outline">text_snippet</span>' +
+      '<h3 class="font-headline-md text-headline-md text-on-surface tracking-tight">Text read from your photo</h3>' +
+      '<p class="font-body-md text-body-md">Possible names: <strong>' + lines + "</strong>" +
+      (ocr.strengths && ocr.strengths.length ? "<br/>Strengths seen: " + ocr.strengths.map(esc).join(", ") : "") + "</p>";
+  }
+
+  function fact(label, value) {
+    if (value == null || value === "") return "";
+    return '<div class="flex flex-col gap-0.5"><span class="font-label-sm text-label-sm text-outline uppercase">' + esc(label) +
+      '</span><span class="font-body-sm text-body-sm font-semibold text-on-surface">' + esc(value) + "</span></div>";
+  }
+
+  function infoSection(icon, color, title, values) {
+    if (typeof values === "string") values = values.split(/;\s*/).filter(Boolean);
+    if (!Array.isArray(values) || !values.length) return "";
+    var items = values.map(function (value) {
+      return '<li>' + esc(value) + "</li>";
+    }).join("");
+    return '<div class="flex flex-col gap-1"><span class="font-label-md text-label-md text-on-surface uppercase tracking-wider flex items-center gap-1.5">' +
+      '<span class="material-symbols-outlined ' + color + ' text-[18px]">' + icon + "</span>" + esc(title) + "</span>" +
+      '<ul class="font-body-md text-body-md text-on-surface-variant leading-relaxed pl-10 list-disc">' + items + "</ul></div>";
+  }
+
+  function ingredientsSection(ingredients, composition) {
+    var values = Array.isArray(ingredients) && ingredients.length ? ingredients : (composition || []);
+    if (!values.length) return "";
+    var items = values.map(function (item) {
+      if (typeof item === "string") return "<li>" + esc(item) + "</li>";
+      var label = item.name || "Ingredient";
+      var strength = item.strength || item.value;
+      var unit = item.unit || "";
+      var detail = strength ? " — " + strength + " " + unit : "";
+      var metadata = item.type || item.role ? " (" + [item.type, item.role].filter(Boolean).map(esc).join(" · ") + ")" : "";
+      return "<li><strong>" + esc(label) + "</strong>" + esc(detail) + metadata + "</li>";
+    }).join("");
+    return '<div class="flex flex-col gap-1"><span class="font-label-md text-label-md text-on-surface uppercase tracking-wider flex items-center gap-1.5">' +
+      '<span class="material-symbols-outlined text-primary text-[18px]">pill</span>Active Ingredients &amp; Composition</span>' +
+      '<ul class="font-body-md text-body-md text-on-surface-variant leading-relaxed pl-10 list-disc">' + items + "</ul></div>";
+  }
+
+  function strengthText(p) {
+    var c = p.composition || [];
+    var withVal = c.filter(function (x) { return x.value; });
+    return withVal.length ? withVal.map(function (x) { return x.value + " " + x.unit; }).join(" + ") : null;
+  }
+
+  function renderMedicine(p, confirmed) {
+    els.resEmpty.classList.add("hidden"); els.resContent.classList.remove("hidden");
+    var badges = "";
+    if (p.schedule) badges += '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant">' + esc(p.schedule) + "</span>";
+    if (p.dosage_form) badges += '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant">' + esc(p.dosage_form) + "</span>";
+    badges += confirmed
+      ? '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-[#FFFBEB] text-[#92400E] border border-[#FCD34D] flex items-center gap-1"><span class="material-symbols-outlined text-[13px]">auto_awesome</span> AI-assisted · unverified</span>'
+      : '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-[#FFFBEB] text-[#92400E] border border-[#FCD34D]">Possible match - not confirmed</span>';
+    els.badges.innerHTML = badges;
+    els.resName.textContent = p.name || UNAVAILABLE;
+    els.resGeneric.textContent = p.generic_name || p.composition_text || "";
+    if (p.image_url) { els.resImage.src = p.image_url; els.resImage.classList.remove("hidden"); }
+    else { els.resImage.classList.add("hidden"); els.resImage.removeAttribute("src"); }
+
+    var pack = (p.packagings || []).find(function (x) { return x.label; });
+    var mrp = (p.packagings || []).find(function (x) { return x.mrp != null; });
+    els.facts.innerHTML =
+      fact("Brand Name", p.name) + fact("Generic Name", p.generic_name) + fact("Strength", p.strength || strengthText(p)) + fact("Manufacturer", p.manufacturer) +
+      fact("Dosage Form", p.dosage_form) + fact("Packaging", pack && pack.label) + fact("MRP", mrp ? rupee(mrp.mrp) : null);
+
+    var html = ingredientsSection(p.ingredients, p.composition) +
+      infoSection("info", "text-primary", "Primary Uses", p.primary_uses || p.uses) +
+      infoSection("info", "text-tertiary", "Common Side Effects", p.common_side_effects || p.side_effects) +
+      infoSection("warning", "text-error", "Serious Side Effects", p.serious_side_effects) +
+      infoSection("shield", "text-secondary", "Clinical Precautions", p.clinical_precautions || p.precautions) +
+      infoSection("warning", "text-error", "Warnings", p.warnings) +
+      infoSection("swap_horiz", "text-tertiary", "Drug Interactions", p.drug_interactions || p.interactions) +
+      infoSection("warning", "text-error", "Overdose Information", p.overdose_information) +
+      infoSection("inventory_2", "text-secondary", "Storage Instructions", p.storage_instructions) +
+      infoSection("verified_user", "text-primary", "Prescription Classification", p.prescription_classification || p.schedule);
+    if (p.sources && p.sources.length) html += infoSection("source", "text-outline", "Sources", p.sources);
+    els.sections.innerHTML = html;
+  }
+
+  function renderPossible(list, ocr) {
+    els.resEmpty.classList.remove("hidden");
+    var read = ocr && ocr.candidate_names && ocr.candidate_names.length ? "Read from your photo: <strong>" + ocr.candidate_names.map(esc).join(", ") + "</strong>. " : "";
+    els.resEmpty.innerHTML = '<span class="material-symbols-outlined text-[36px] text-[#D97706]">help</span>' +
+      '<h3 class="font-headline-md text-headline-md text-on-surface tracking-tight">Medicine not confirmed</h3>' +
+      '<p class="font-body-md text-body-md">' + read + "Pick the closest match to view its details, or retake a clearer photo.</p>" +
+      '<div class="flex flex-wrap gap-space-sm" id="possibleList"></div>';
+    var box = $("possibleList");
+    list.forEach(function (p, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "px-3 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-label-md text-label-md";
+      b.textContent = p.name || "Unnamed product";
+      b.addEventListener("click", function () { renderMedicine(state.possible[i], false); setStatus("warn", "This is a possible match only. Verify it against your medicine pack."); });
+      box.appendChild(b);
+    });
+  }
+
+  function renderComparison(cmp, base) {
+    els.priceBody.innerHTML = "";
+    var rows = (cmp && cmp.rows) || [];
+    if (!rows.length) {
+      els.priceEmpty.classList.remove("hidden");
+      els.priceEmpty.textContent = "No comparable products were identified. Price information unavailable.";
+      return;
+    }
+    els.priceEmpty.classList.add("hidden");
+    var form = base.dosage_form ? " " + base.dosage_form : "";
+    els.standard.textContent = "AI-suggested comparable products" + (base.composition_text ? " · " + base.composition_text + form : "");
+    rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+      var cls = "hover:bg-surface-container-low/60";
+      tr.className = cls + " transition-colors";
+      var badge = r.is_scanned
+        ? '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant whitespace-nowrap">Scanned</span>'
+        : '<span class="font-label-sm text-label-sm px-2 py-0.5 rounded bg-[#FFFBEB] text-[#92400E] border border-[#FCD34D] whitespace-nowrap">Dataset match</span>';
+      var nameCls = r.is_scanned ? "font-semibold text-primary" : "font-medium text-on-surface";
+      var priceCls = "font-medium text-on-surface-variant";
+      tr.innerHTML =
+        '<td class="py-4 px-space-md ' + nameCls + '"><div class="flex items-center gap-2 flex-wrap"><span>' + esc(r.name || UNAVAILABLE) + "</span>" + badge + "</div></td>" +
+        '<td class="py-4 px-space-md text-on-surface-variant">' + esc(r.manufacturer || UNAVAILABLE) + "</td>" +
+        '<td class="py-4 px-space-md text-on-surface-variant">' + esc(r.pack_label || (r.quantity ? r.quantity + " units" : UNAVAILABLE)) + "</td>" +
+        '<td class="py-4 px-space-md text-right ' + priceCls + '">' + esc(r.mrp != null ? rupee(r.mrp) : "Unavailable") + "</td>" +
+        '<td class="py-4 px-space-md text-right font-data-mono text-data-mono text-on-surface-variant">' + esc(r.per_unit != null ? rupee(r.per_unit) : "Unavailable") + "</td>";
+      els.priceBody.appendChild(tr);
+    });
+  }
+
+  els.scan.addEventListener("click", identify);
+  window.addEventListener("pagehide", function () { MediCamera.stop(); cancelRequest(); });
+
+  // test hook (read-only state for browser tests)
+  window.__mediscan = { state: state };
+})();
