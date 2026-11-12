@@ -194,7 +194,7 @@ def create_app(gemini_client=None) -> Flask:
         # CSV loader streams rows to keep memory bounded on Render's free tier.
         try:
             from medicine_dataset import enrich_result_streaming
-            identified = result.get("match") or (result.get("possible") or [None])[0]
+            identified = result.get("match")
             candidate_names = []
             if identified:
                 candidate_names.extend([
