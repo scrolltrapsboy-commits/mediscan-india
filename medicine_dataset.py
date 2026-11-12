@@ -124,20 +124,23 @@ def _read(path: Path) -> list[dict]:
 
 
 @lru_cache(maxsize=1)
-def _catalog() -> tuple[list[dict], dict[str, list[int]], dict[frozenset[str], list[int]]]:
+def _catalog() -> tuple[list[dict], dict[str, list[int]], dict[frozenset[str], list[int]], dict[str, set[str]]]:
     detail_rows = _read(DETAIL_FILE)
     fallback_rows = _read(CATALOG_FILE)
     rows = detail_rows or fallback_rows
     by_name: dict[str, list[int]] = {}
     by_composition: dict[frozenset[str], list[int]] = {}
+    by_token: dict[str, set[str]] = {}
     for index, row in enumerate(rows):
         name = _clean(row.get("name"))
         if name:
             by_name.setdefault(name, []).append(index)
+            for token in name.split():
+                by_token.setdefault(token, set()).add(name)
         comp = _key(_composition(row))
         if comp:
             by_composition.setdefault(comp, []).append(index)
-    return rows, by_name, by_composition
+    return rows, by_name, by_composition, by_token
 
 
 def _row_product(row: dict) -> dict:
@@ -193,7 +196,7 @@ def _row_product(row: dict) -> dict:
 
 
 def find(names: list[str]) -> Optional[dict]:
-    rows, by_name, _ = _catalog()
+    rows, by_name, _, by_token = _catalog()
     candidates = [_clean(name) for name in names if _clean(name)]
     if not candidates:
         return None
@@ -202,7 +205,13 @@ def find(names: list[str]) -> Optional[dict]:
     for query in candidates[:5]:
         for index in by_name.get(query, []):
             return _row_product(rows[index])
-        for name, indexes in by_name.items():
+        candidate_names = set()
+        for token in query.split():
+            candidate_names.update(by_token.get(token, set()))
+        if not candidate_names:
+            candidate_names = set(by_name)
+        for name in candidate_names:
+            indexes = by_name[name]
             score = SequenceMatcher(None, query, name).ratio()
             if query in name or name in query:
                 score = max(score, 0.86)
@@ -227,7 +236,7 @@ def enrich(product: Optional[dict], names: list[str]) -> Optional[dict]:
 
 
 def comparable(base: dict, limit: int = 10) -> list[dict]:
-    rows, _, by_composition = _catalog()
+    rows, _, by_composition, _ = _catalog()
     comp = _key(base.get("composition") or [])
     if not comp:
         return []
