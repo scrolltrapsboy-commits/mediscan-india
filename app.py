@@ -190,9 +190,40 @@ def create_app(gemini_client=None) -> Flask:
             return jsonify(status="error", message="Medicine identification is temporarily unavailable. Please try again.",
                            vision=vision, ocr=ocr_info), 503
 
+        # Enrich only after Gemini has identified a printed medicine name. The
+        # CSV loader streams rows to keep memory bounded on Render's free tier.
+        try:
+            from medicine_dataset import enrich_result_streaming
+            identified = result.get("match") or (result.get("possible") or [None])[0]
+            candidate_names = []
+            if identified:
+                candidate_names.extend([
+                    identified.get("name"), identified.get("generic_name"),
+                    identified.get("composition_text"),
+                ])
+            result = enrich_result_streaming(result, [x for x in candidate_names if x])
+        except Exception:
+            log.exception("CSV medicine enrichment failed")
+            result.setdefault("warnings", []).append(
+                "The local medicine dataset could not be read. Missing details remain unavailable."
+            )
+
         match = result.get("match")
         possible = result.get("possible") or []
         warnings = list(result.get("warnings") or [])
+
+        # Ask Gemini to explain the matched CSV facts, without allowing it to
+        # invent missing details or dosing advice. The factual record remains
+        # separately labelled as local-dataset information.
+        if match and match.get("dataset_match"):
+            try:
+                explanation = client.explain_dataset_details(match)
+                if explanation:
+                    match["ai_explanation"] = explanation
+                    match["explanation_source"] = "Gemini explanation of local CSV data"
+            except Exception:
+                log.warning("AI explanation unavailable; retaining the CSV facts", exc_info=True)
+                warnings.append("The AI explanation could not be generated. The available CSV facts are shown without it.")
         warnings.append("AI identification is unverified. Confirm the medicine name and composition on the package or with a pharmacist.")
         comparison = result.get("comparison") or {"rows": [], "basis": "unavailable", "price_status": "unavailable"}
         return jsonify(
